@@ -166,6 +166,95 @@ class GaussianObservations(Observations):
         """
         return expectations.dot(self.mus)
 
+class InputDrivenGaussianObservations(Observations):
+    def __init__(self, K, D, M=0):
+        super(InputDrivenGaussianObservations, self).__init__(K, D, M)
+        self.Vs = npr.randn(K,D,M)
+        self.bs = npr.randn(K,D)
+        self._sqrt_Sigmas = npr.randn(K, D, D)
+
+    @property
+    def params(self):
+        return self.Vs, self.bs, self._sqrt_Sigmas
+
+    @params.setter
+    def params(self, value):
+        self.Vs, self.bs, self._sqrt_Sigmas = value
+
+    def permute(self, perm):
+        self.Vs = self.Vs[perm]
+        self.bs = self.bs[perm]
+        self._sqrt_Sigmas = self._sqrt_Sigmas[perm]
+
+    @property
+    def Sigmas(self):
+        return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
+
+    def _compute_mus(self, data, input, mask, tag):
+        # assert np.all(mask), "ARHMM cannot handle missing data"
+        K, M = self.K, self.M
+        T, D = data.shape
+        bs, Vs = self.bs, self.Vs
+
+        # Instantaneous inputs
+        mus = np.empty((K, T, D))
+        mus = []
+        for k, (b, V) in enumerate(zip(bs, Vs)):
+            # calculate mu with V and b according to input at each time point
+            mus_k = np.dot(input[:, :M], V.T) + b
+
+            # Append concatenated mean
+            mus.append(mus_k)
+
+        return np.array(mus)
+
+    def smooth(self, expectations, data, input, tag):
+        """
+        Compute the mean observation under the posterior distribution
+        of latent discrete states.
+        """
+        T = expectations.shape[0]
+        mask = np.ones((T, self.D), dtype=bool)
+        mus = np.swapaxes(self._compute_mus(data, input, mask, tag), 0, 1)
+        return (expectations[:, :, None] * mus).sum(1)
+
+    def log_likelihoods(self, data, input, mask, tag):
+        if mask is not None and np.any(~mask) and not isinstance(mus, np.ndarray):
+            raise Exception("Current implementation of multivariate_normal_logpdf for masked data"
+                            "does not work with autograd because it writes to an array. "
+                            "Use DiagonalGaussian instead if you need to support missing data.")
+
+        # stats.multivariate_normal_logpdf supports broadcasting, but we get
+        # significant performance benefit if we call it with (TxD), (D,), and (D,D)
+        # arrays as inputs
+        mus = self._compute_mus(data,input,mask,tag)
+        return np.column_stack([stats.multivariate_normal_logpdf(data, mu, Sigma)
+                               for mu, Sigma in zip(mus, self.Sigmas)])
+
+    def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
+        D, mus = self.D, self.mus
+        sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
+        return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        Observations.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+        # K, D = self.K, self.D
+        # J = np.zeros((K, D))
+        # h = np.zeros((K, D))
+        # for (Ez, _, _), y in zip(expectations, datas):
+        #     J += np.sum(Ez[:, :, None], axis=0)
+        #     h += np.sum(Ez[:, :, None] * y[:, None, :], axis=0)
+        # self.mus = h / J
+
+        # # Update the variance
+        # sqerr = np.zeros((K, D, D))
+        # weight = np.zeros((K,))
+        # for (Ez, _, _), y in zip(expectations, datas):
+        #     resid = y[:, None, :] - self.mus
+        #     sqerr += np.sum(Ez[:, :, None, None] * resid[:, :, None, :] * resid[:, :, :, None], axis=0)
+        #     weight += np.sum(Ez, axis=0)
+        # self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
+
 class ExponentialObservations(Observations):
     def __init__(self, K, D, M=0):
         super(ExponentialObservations, self).__init__(K, D, M)

@@ -80,6 +80,7 @@ class HMM(object):
         # When you create a new observation class, add it here.
         observation_classes = dict(
             gaussian=obs.GaussianObservations,
+            input_driven_gaussian=obs.InputDrivenGaussian,
             diagonal_gaussian=obs.DiagonalGaussianObservations,
             studentst=obs.MultivariateStudentsTObservations,
             t=obs.MultivariateStudentsTObservations,
