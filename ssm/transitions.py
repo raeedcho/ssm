@@ -325,9 +325,12 @@ class RecurrentOnlyTransitions(Transitions):
         super(RecurrentOnlyTransitions, self).__init__(K, D, M)
 
         # Parameters linking past observations to state distribution
-        self.Ws = npr.randn(K, M)
-        self.Rs = npr.randn(K, D)
-        self.r = npr.randn(K)
+        # self.Ws = npr.randn(K, M)
+        # self.Rs = npr.randn(K, D)
+        # self.r = npr.randn(K)
+        self.Ws = np.zeros((K, M))
+        self.Rs = np.zeros((K, D))
+        self.r = np.zeros((K))
 
     @property
     def params(self):
