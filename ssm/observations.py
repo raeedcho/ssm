@@ -191,7 +191,6 @@ class InputDrivenGaussianObservations(Observations):
         return np.matmul(self._sqrt_Sigmas, np.swapaxes(self._sqrt_Sigmas, -1, -2))
 
     def _compute_mus(self, data, input, mask, tag):
-        # assert np.all(mask), "ARHMM cannot handle missing data"
         K, M = self.K, self.M
         T, D = data.shape
         bs, Vs = self.bs, self.Vs
@@ -232,28 +231,36 @@ class InputDrivenGaussianObservations(Observations):
                                for mu, Sigma in zip(mus, self.Sigmas)])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        D, mus = self.D, self.mus
+        mus = np.dot(input[:,:M],self.Vs[z].T)+self.bs[z]
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
-        return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(D))
+        return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(self.D))
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
-        Observations.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
-        # K, D = self.K, self.D
-        # J = np.zeros((K, D))
-        # h = np.zeros((K, D))
-        # for (Ez, _, _), y in zip(expectations, datas):
-        #     J += np.sum(Ez[:, :, None], axis=0)
-        #     h += np.sum(Ez[:, :, None] * y[:, None, :], axis=0)
-        # self.mus = h / J
+        K, D, M = self.K, self.D, self.M
 
-        # # Update the variance
-        # sqerr = np.zeros((K, D, D))
-        # weight = np.zeros((K,))
-        # for (Ez, _, _), y in zip(expectations, datas):
-        #     resid = y[:, None, :] - self.mus
-        #     sqerr += np.sum(Ez[:, :, None, None] * resid[:, :, None, :] * resid[:, :, :, None], axis=0)
-        #     weight += np.sum(Ez, axis=0)
-        # self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
+        # fit weighted linear regression for each state
+        for k in range(K):
+            h = np.zeros((M+1,D))
+            J = np.zeros((M+1,M+1))
+            for (Ez, _, _), y, x in zip(expectations, datas, inputs):
+                # put together input matrix to account for bias term
+                x_aug = np.column_stack((x,np.ones((y.shape[0],1))))
+                h += np.einsum('t,tm,td->md',Ez[:,k],x_aug,y)
+                J += np.einsum('t,ti,tj->ij',Ez[:,k],x_aug,x_aug)
+
+            param_set = np.linalg.solve(J,h).T
+            self.Vs[k,:,:] = param_set[:,:-1]
+            self.bs[k,:] = param_set[:,-1]
+
+        # Update the variance
+        sqerr = np.zeros((K, D, D))
+        weight = np.zeros((K,))
+        for (Ez, _, _), y, x, mask, tag in zip(expectations, datas, inputs, masks, tags):
+            mus = self._compute_mus(y,x,mask,tag).transpose((1,0,2)) # makes this T x K x D
+            resid = y[:, None, :] - mus
+            sqerr += np.sum(Ez[:, :, None, None] * resid[:, :, None, :] * resid[:, :, :, None], axis=0)
+            weight += np.sum(Ez, axis=0)
+        self._sqrt_Sigmas = np.linalg.cholesky(sqerr / weight[:, None, None] + 1e-8 * np.eye(self.D))
 
 class ExponentialObservations(Observations):
     def __init__(self, K, D, M=0):
