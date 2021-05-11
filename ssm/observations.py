@@ -197,13 +197,15 @@ class InputDrivenGaussianObservations(Observations):
 
         # Instantaneous inputs
         mus = np.empty((K, T, D))
-        mus = []
         for k, (b, V) in enumerate(zip(bs, Vs)):
             # calculate mu with V and b according to input at each time point
             mus_k = np.dot(input[:, :M], V.T) + b
 
+            if D==1 and mus_k.ndim==1 and mus_k.shape==(T,):
+                mus_k = mus_k[:,None]
+
             # Append concatenated mean
-            mus.append(mus_k)
+            mus[k,:,:] = mus_k
 
         return np.array(mus)
 
@@ -231,9 +233,9 @@ class InputDrivenGaussianObservations(Observations):
                                for mu, Sigma in zip(mus, self.Sigmas)])
 
     def sample_x(self, z, xhist, input=None, tag=None, with_noise=True):
-        mus = np.dot(input[:,:M],self.Vs[z].T)+self.bs[z]
+        mus = np.dot(input,self.Vs[z].T)+self.bs[z]
         sqrt_Sigmas = self._sqrt_Sigmas if with_noise else np.zeros((self.K, self.D, self.D))
-        return mus[z] + np.dot(sqrt_Sigmas[z], npr.randn(self.D))
+        return mus + np.dot(sqrt_Sigmas[z], npr.randn(self.D))
 
     def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
         K, D, M = self.K, self.D, self.M

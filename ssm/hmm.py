@@ -201,7 +201,7 @@ class HMM(object):
             assert input.shape == (T,) + M
 
         # Get the type of the observations
-        if isinstance(self.observations, obs.InputDrivenObservations):
+        if isinstance(self.observations, obs.InputDrivenObservations) or isinstance(self.observations, obs.InputDrivenGaussianObservations):
             dtype = int
         else:
             dummy_data = self.observations.sample_x(0, np.empty(0, ) + D)
