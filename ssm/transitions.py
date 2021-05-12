@@ -262,6 +262,50 @@ class InputDrivenTransitions(StickyTransitions):
         T, D = data.shape
         return np.zeros((T-1, D, D))
 
+class InputOnlyTransitions(Transitions):
+    """
+    Only allow the inputs to influence the
+    next state.  Get rid of the transition matrix and replace it
+    with a constant bias r.
+    """
+    def __init__(self, K, D, M=0):
+        super(InputOnlyTransitions, self).__init__(K, D, M)
+
+        # Parameters linking inputs to state distribution
+        # self.Ws = npr.randn(K, M)
+        # self.r = npr.randn(K)
+        self.Ws = np.zeros((K, M))
+        self.r = np.zeros((K))
+
+    @property
+    def params(self):
+        return self.Ws, self.r
+
+    @params.setter
+    def params(self, value):
+        self.Ws, self.r = value
+
+    def permute(self, perm):
+        """
+        Permute the discrete latent states.
+        """
+        self.Ws = self.Ws[perm]
+        self.r = self.r[perm]
+
+    def log_transition_matrices(self, data, input, mask, tag):
+        log_Ps = np.dot(input[1:], self.Ws.T)[:, None, :]              # inputs
+        log_Ps = log_Ps + self.r                                       # bias
+        log_Ps = np.tile(log_Ps, (1, self.K, 1))                       # expand
+        return log_Ps - logsumexp(log_Ps, axis=2, keepdims=True)       # normalize
+
+    def m_step(self, expectations, datas, inputs, masks, tags, **kwargs):
+        Transitions.m_step(self, expectations, datas, inputs, masks, tags, **kwargs)
+
+    def neg_hessian_expected_log_trans_prob(self, data, input, mask, tag, expected_joints):
+        # Return (T-1, D, D) array of blocks for the diagonal of the Hessian
+        T, D = data.shape
+        return np.zeros((T-1, D, D))
+
 class RecurrentTransitions(InputDrivenTransitions):
     """
     Generalization of the input driven HMM in which the observations serve as future inputs
